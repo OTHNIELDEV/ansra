@@ -51,7 +51,10 @@ export default function Landing(props) {
           <a href="/dashboard" style={{"color":"#3B424C","textDecoration":"none"}}>
             {"대시보드 보기"}
           </a>
-          <a href="#apply" style={{"background":"#111418","color":"#fff","textDecoration":"none","padding":"12px 18px","borderRadius":"10px","fontWeight":"500"}}>
+          <a href="/login" style={{"color":"#3B424C","textDecoration":"none"}}>
+        {"로그인"}
+      </a>
+      <a href="#apply" style={{"background":"#111418","color":"#fff","textDecoration":"none","padding":"12px 18px","borderRadius":"10px","fontWeight":"500"}}>
             {"무료 진단 받기"}
           </a>
         </nav>
