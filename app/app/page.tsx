@@ -1,39 +1,15 @@
 import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
-import { createClient } from '../../lib/supabase/server';
-import { addPrompt, createWorkspace, removePrompt, runMeasurement, signOut } from './actions';
+import { getContext } from '../../lib/brand';
+import { card, field, ghost, label, pct, primary } from '../../lib/ui';
+import { addPrompt, createWorkspace, removePrompt, runMeasurement } from './actions';
 
 export const metadata: Metadata = { title: 'ANSRA 앱' };
 export const dynamic = 'force-dynamic';
 
-const card = { background: '#fff', border: '1px solid #E4E7EB', borderRadius: 14, padding: 20 } as const;
-const field = { padding: 12, border: '1px solid #C5CAD2', borderRadius: 10, fontSize: 15, minWidth: 0 } as const;
-const label = { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, fontWeight: 500 } as const;
-const primary = { minHeight: 44, padding: '0 18px', background: '#2B3FE0', color: '#fff', border: 0, borderRadius: 10, fontSize: 15, fontWeight: 500 } as const;
-const ghost = { minHeight: 44, padding: '0 14px', background: '#fff', color: '#111418', border: '1px solid #C5CAD2', borderRadius: 10, fontSize: 14 } as const;
-const pct = (a: number, b: number) => (b ? ((a / b) * 100).toFixed(1) + '%' : '—');
-
 export default async function AppPage({ searchParams }: { searchParams: { m?: string } }) {
-  const supabase = createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) redirect('/login');
-
-  const { data: brands } = await supabase.from('brands').select('id,workspace_id,name,region,vertical,domain').order('created_at').limit(1);
-  const brand = brands?.[0];
+  const { supabase, brand } = await getContext();
   const notice = searchParams.m ? <div role="status" style={{ ...card, background: '#EEF0FE', borderColor: '#C9D0FB', color: '#1B2AA8', fontSize: 14 }}>{searchParams.m}</div> : null;
-
-  const shell = (children: React.ReactNode) => (
-    <main style={{ maxWidth: 1080, margin: '0 auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 20, background: '#F6F7F8', minHeight: '100vh' }}>
-      <header style={{ display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between', alignItems: 'center' }}>
-        <a href="/" style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, fontSize: 22, color: '#111418', textDecoration: 'none' }}>ANSRA<span style={{ color: '#2B3FE0' }}>.</span></a>
-        <form action={signOut} style={{ display: 'flex', gap: 12, alignItems: 'center', fontSize: 14, color: '#3B424C' }}>
-          <span>{auth.user!.email}</span><button style={ghost}>로그아웃</button>
-        </form>
-      </header>
-      {notice}
-      {children}
-    </main>
-  );
+  const shell = (children: React.ReactNode) => <>{notice}{children}</>;
 
   if (!brand) {
     return shell(
@@ -78,10 +54,6 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
         </div>
         <form action={runMeasurement}><input type="hidden" name="brand_id" value={brand.id} /><button style={primary}>모의 측정 실행</button></form>
       </section>
-      <div style={{ ...card, background: '#FFF7E6', borderColor: '#F1D9A6', fontSize: 14, lineHeight: 1.6, color: '#6B4A00' }}>
-        지금은 <strong>모의 엔진</strong>이 만든 가짜 답변으로 측정합니다. 아래 수치는 저장·집계 과정이 동작하는지 보여 줄 뿐, 실제 AI 검색 노출과는 관계가 없습니다.
-      </div>
-
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         <div style={card}><div style={{ fontSize: 13, color: '#5B6470' }}>전체 노출 점유율</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 700 }}>{pct(total.hit, total.n)}</div><div style={{ fontSize: 12, color: '#5B6470' }}>표본 {total.n}회 · 30일</div></div>
         {(engines || []).map((e) => {
