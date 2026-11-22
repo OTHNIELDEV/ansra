@@ -1,10 +1,13 @@
 import type { Metadata } from 'next';
 import { getContext } from '../../lib/brand';
 import { card, field, ghost, label, pct, primary } from '../../lib/ui';
+import { connectedEngines } from '../../lib/engines/real';
+import { MOCK_MODEL } from '../../lib/measure';
 import { addPrompt, createWorkspace, removePrompt, runMeasurement } from './actions';
 
 export const metadata: Metadata = { title: 'ANSRA 앱' };
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // real engine calls run inside the measurement action
 
 export default async function AppPage({ searchParams }: { searchParams: { m?: string } }) {
   const { supabase, brand } = await getContext();
@@ -43,7 +46,9 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
   });
   const total = [...byEngine.values()].reduce((a, b) => ({ n: a.n + b.n, hit: a.hit + b.hit }), { n: 0, hit: 0 });
   const labelOf = new Map((engines || []).map((e) => [e.key, e.label]));
-  const hasMock = (recent || []).some((r) => r.model_version === 'mock-v1');
+  const hasMock = (recent || []).some((r) => r.model_version === MOCK_MODEL);
+  const connected = connectedEngines();
+  const real = connected.length > 0;
 
   return shell(
     <>
@@ -52,12 +57,14 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
           <h1 style={{ margin: 0, fontSize: 22 }}>{brand.name}</h1>
           <div style={{ fontSize: 14, color: '#5B6470', marginTop: 4 }}>{[brand.region, brand.vertical, brand.domain].filter(Boolean).join(' · ') || '추가 정보 없음'}</div>
         </div>
-        <form action={runMeasurement}><input type="hidden" name="brand_id" value={brand.id} /><button style={primary}>모의 측정 실행</button></form>
+        <form action={runMeasurement}><input type="hidden" name="brand_id" value={brand.id} /><button style={primary}>{real ? '측정 실행' : '모의 측정 실행'}</button></form>
       </section>
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         <div style={card}><div style={{ fontSize: 13, color: '#5B6470' }}>전체 노출 점유율</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 700 }}>{pct(total.hit, total.n)}</div><div style={{ fontSize: 12, color: '#5B6470' }}>표본 {total.n}회 · 30일</div></div>
         {(engines || []).map((e) => {
           const m = byEngine.get(e.key) || { n: 0, hit: 0 };
+          const off = real && !connected.includes(e.key) && m.n === 0;
+          if (off) return <div key={e.key} style={{ ...card, background: '#F1F3F5' }}><div style={{ fontSize: 13, color: '#5B6470' }}>{e.label}</div><div style={{ fontSize: 15, fontWeight: 500, color: '#5B6470', marginTop: 8 }}>미연결</div></div>;
           return <div key={e.key} style={card}><div style={{ fontSize: 13, color: '#5B6470' }}>{e.label}</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 700 }}>{pct(m.hit, m.n)}</div><div style={{ fontSize: 12, color: '#5B6470' }}>표본 {m.n}회</div></div>;
         })}
       </section>

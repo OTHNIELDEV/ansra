@@ -2,7 +2,7 @@
 
 export type Entity = { name: string; aliases: string[]; brandId?: string; competitorId?: string };
 export type Mention = { name: string; position: number; snippet: string; brandId?: string; competitorId?: string };
-export type EngineAnswer = { text: string; citations: { url: string; isOwned: boolean }[]; modelVersion: string; extraNames: string[] };
+export type EngineAnswer = { text: string; citations: { url: string; isOwned: boolean; domain?: string }[]; modelVersion: string; extraNames: string[] };
 export type EngineAdapter = (input: { prompt: string; engine: string; sample: number; brand: Entity & { domain?: string | null }; competitors: Entity[] }) => Promise<EngineAnswer>;
 
 function seeded(seed: string) {
@@ -21,6 +21,8 @@ const FILLERS = ['지역 업체 가', '지역 업체 나', '지역 업체 다'];
 
 // Mock engine: produces made-up answers so the pipeline can be exercised without API keys.
 // Its numbers say nothing about real AI search visibility.
+export const MOCK_MODEL = 'mock-v1';
+
 export const mockAdapter: EngineAdapter = async ({ prompt, engine, sample, brand, competitors }) => {
   const rnd = seeded(`${prompt}|${engine}|${sample}|${Date.now()}`);
   const picked: string[] = [];
@@ -32,7 +34,7 @@ export const mockAdapter: EngineAdapter = async ({ prompt, engine, sample, brand
   const text = `[모의 답변] "${prompt}" 질문에 대해 다음 순서로 소개합니다. ` + picked.map((n, i) => `${i + 1}) ${n}`).join(' ') + '.';
   const citations: EngineAnswer['citations'] = [{ url: 'https://example.com/mock-review', isOwned: false }];
   if (picked.includes(brand.name) && brand.domain && rnd() < 0.6) citations.push({ url: `https://${brand.domain.replace(/^https?:\/\//, '')}/`, isOwned: true });
-  return { text, citations, modelVersion: 'mock-v1', extraNames: FILLERS };
+  return { text, citations, modelVersion: MOCK_MODEL, extraNames: FILLERS };
 };
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '').replace(/[㈜()]/g, '');
