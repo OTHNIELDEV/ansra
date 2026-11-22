@@ -31,7 +31,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       ) : null}
       {brand && connected.length > 0 ? (
         <div style={{ ...card, background: '#EEF6F1', borderColor: '#BFDCCB', fontSize: 14, lineHeight: 1.6, color: '#0B4F2A' }}>
-          실제 API로 측정하는 엔진: <strong>{(labels || []).map((l) => l.label).join(', ')}</strong>. 나머지 엔진은 아직 연결되지 않았습니다. API 답변은 각 서비스 앱에서 보는 답변과 다를 수 있고, 한 번에 핵심 질문 위주로 최대 4개만 측정합니다.
+          실제 API로 측정하는 엔진: <strong>{(labels || []).map((l) => l.label).join(', ')}</strong>. 나머지 엔진은 아직 연결되지 않았습니다. API 답변은 각 서비스 앱에서 보는 답변과 다를 수 있고, 질문은 최대 20개까지 측정하며, 한 번에 끝나지 않은 측정은 대기 상태로 남습니다.
         </div>
       ) : null}
       {children}

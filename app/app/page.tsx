@@ -4,7 +4,7 @@ import { card, field, ghost, label, pct, primary } from '../../lib/ui';
 import { connectedEngines } from '../../lib/engines/real';
 import { MOCK_MODEL } from '../../lib/measure';
 import { BRAND_KINDS } from '../../lib/prompts';
-import { addCompetitor, addPrompt, addSuggestedPrompts, createWorkspace, removeCompetitor, removePrompt, runMeasurement } from './actions';
+import { addCompetitor, addPrompt, addSuggestedPrompts, createWorkspace, removeCompetitor, removePrompt, runMeasurement, setSchedule } from './actions';
 
 export const metadata: Metadata = { title: 'ANSRA 앱' };
 export const dynamic = 'force-dynamic';
@@ -33,13 +33,15 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
   }
 
   const since = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
-  const [{ data: metrics }, { data: engines }, { data: ranking }, { data: prompts }, { data: recent }, { data: rivals }] = await Promise.all([
+  const [{ data: metrics }, { data: engines }, { data: ranking }, { data: prompts }, { data: recent }, { data: rivals }, { count: pending }, { data: scheduler }] = await Promise.all([
     supabase.from('metrics_daily').select('engine_key,sample_n,mention_n,avg_position,cited_urls').eq('brand_id', brand.id).gte('date', since.slice(0, 10)),
     supabase.from('engines').select('key,label').eq('enabled', true),
     supabase.rpc('brand_ranking', { target_brand: brand.id, since }),
     supabase.from('prompts').select('id,text,tier').eq('brand_id', brand.id).order('created_at'),
     supabase.from('answers').select('id,raw_text,captured_at,model_version,runs(engine_key)').eq('workspace_id', brand.workspace_id).order('captured_at', { ascending: false }).limit(5),
     supabase.from('competitors').select('id,name,aliases').eq('brand_id', brand.id).order('name'),
+    supabase.from('runs').select('id', { count: 'exact', head: true }).eq('workspace_id', brand.workspace_id).in('status', ['queued', 'running']),
+    supabase.rpc('scheduler_active'),
   ]);
 
   const byEngine = new Map<string, { n: number; hit: number }>();
@@ -60,8 +62,27 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
           <h1 style={{ margin: 0, fontSize: 22 }}>{brand.name}</h1>
           <div style={{ fontSize: 14, color: '#5B6470', marginTop: 4 }}>{[brand.region, brand.vertical, brand.domain].filter(Boolean).join(' · ') || '추가 정보 없음'}</div>
         </div>
-        <form action={runMeasurement}><input type="hidden" name="brand_id" value={brand.id} /><button style={primary}>{real ? '측정 실행' : '모의 측정 실행'}</button></form>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+          {pending ? <span style={{ fontSize: 14, color: '#5B6470' }}>대기 중 {pending}회</span> : null}
+          <form action={runMeasurement}><input type="hidden" name="brand_id" value={brand.id} /><button style={primary}>{!real ? '모의 측정 실행' : pending ? '남은 측정 이어서 실행' : '측정 실행'}</button></form>
+        </div>
       </section>
+      {real ? (
+        <section style={{ ...card, display: 'flex', flexWrap: 'wrap', gap: 12, justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 14, lineHeight: 1.6, color: '#3B424C', flex: '1 1 320px' }}>
+            <strong>자동 측정</strong> · {scheduler
+              ? '켜 두면 매일 오전 6시에 등록된 질문(최대 20개)을 연결된 엔진마다 한 번씩 측정합니다. 측정할 때마다 각 엔진의 API 요금이 듭니다.'
+              : '아직 준비 중입니다. 지금은 "측정 실행"을 눌렀을 때만 측정합니다.'}
+          </div>
+          {scheduler ? (
+            <form action={setSchedule} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <input type="hidden" name="brand_id" value={brand.id} />
+              <select name="schedule" defaultValue={brand.schedule} aria-label="자동 측정 주기" style={{ ...field, background: '#fff' }}><option value="off">끄기</option><option value="daily">매일</option></select>
+              <button style={ghost}>저장</button>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
       <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
         <div style={card}><div style={{ fontSize: 13, color: '#5B6470' }}>전체 노출 점유율</div><div style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 30, fontWeight: 700 }}>{pct(total.hit, total.n)}</div><div style={{ fontSize: 12, color: '#5B6470' }}>표본 {total.n}회 · 30일</div></div>
         {(engines || []).map((e) => {

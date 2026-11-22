@@ -2,11 +2,13 @@
 -- raising "RESULT: ...", so nothing it creates is kept.
 -- Expected: metrics=1/1 a_cites=1/owned a_opp=1/1 a_content=1 b_brands=1 b_answers=0 b_metrics=0 b_insert=blocked b_update=0 b_delete=0 b_ranking=0
 --           b_cites=0 b_opps=0 b_contents=0 b_reviews=0 b_content_insert=blocked anon_brands=0
+--           a_claim=ok a_done=1 b_claim=blocked b_own=none b_complete=blocked b_enqueue=blocked anon_claim=blocked
 do $$
 declare
   ua uuid := gen_random_uuid(); ub uuid := gen_random_uuid();
   wa uuid; wb uuid; ba uuid; pa uuid; ra uuid := gen_random_uuid(); aa uuid := gen_random_uuid();
   ca uuid := gen_random_uuid(); n int; s int; t text; res text := '';
+  q1 uuid := gen_random_uuid(); q2 uuid := gen_random_uuid(); j jsonb;
 begin
   insert into auth.users(id, instance_id, aud, role, email) values
     (ua, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'iso-a@test.invalid'),
@@ -32,6 +34,15 @@ begin
   insert into public.compliance_reviews(workspace_id, content_id, rulepack, rulepack_version, verdict) values (wa, ca, 'general-ad-ko', '0.1.0', 'pass');
   select count(*) into n from public.contents; res := res || ' a_content=' || n;
 
+  insert into public.runs(id, workspace_id, prompt_id, engine_key, status, scheduled_at) values
+    (q1, wa, pa, 'chatgpt', 'queued', now() - interval '1 minute'), (q2, wa, pa, 'chatgpt', 'queued', now());
+  j := public.claim_run('', array['chatgpt'], wa);
+  res := res || ' a_claim=' || case when (j->>'run_id')::uuid = q1 and j->'brand'->>'name' = '브랜드A' then 'ok' else 'WRONG' end;
+  perform public.complete_run('', q1, jsonb_build_object('status', 'done', 'text', '큐 답변', 'model_version', 't',
+    'mentions', jsonb_build_array(jsonb_build_object('brand_id', ba, 'name', '브랜드A', 'position', 1))));
+  select count(*) into n from public.answers an join public.runs r on r.id = an.run_id where r.id = q1 and r.status = 'done';
+  res := res || ' a_done=' || n;
+
   perform set_config('request.jwt.claims', json_build_object('sub', ub, 'role', 'authenticated')::text, true);
   wb := public.create_workspace('B', '브랜드B');
   select count(*) into n from public.brands;        res := res || ' b_brands=' || n;
@@ -56,9 +67,19 @@ begin
   exception when others then res := res || ' b_content_insert=blocked';
   end;
 
+  begin j := public.claim_run('', array['chatgpt'], wa); res := res || ' b_claim=ALLOWED';
+  exception when others then res := res || ' b_claim=blocked'; end;
+  j := public.claim_run('', array['chatgpt'], wb); res := res || ' b_own=' || coalesce(j->>'run_id', 'none');
+  begin perform public.complete_run('', q2, '{"status":"done","text":"침입"}'::jsonb); res := res || ' b_complete=ALLOWED';
+  exception when others then res := res || ' b_complete=blocked'; end;
+  begin perform public.enqueue_scheduled('', array['chatgpt']); res := res || ' b_enqueue=ALLOWED';
+  exception when others then res := res || ' b_enqueue=blocked'; end;
+
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);
   perform set_config('role', 'anon', true);
   select count(*) into n from public.brands; res := res || ' anon_brands=' || n;
+  begin j := public.claim_run('', array['chatgpt'], wa); res := res || ' anon_claim=ALLOWED';
+  exception when others then res := res || ' anon_claim=blocked'; end;
 
   raise exception 'RESULT: %', res;
 end $$;
