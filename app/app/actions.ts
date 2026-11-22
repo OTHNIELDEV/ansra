@@ -6,6 +6,10 @@ import { redirect } from 'next/navigation';
 import { createClient } from '../../lib/supabase/server';
 import { MOCK_MODEL, extractMentions, mockAdapter, type EngineAnswer, type Entity } from '../../lib/measure';
 import { EngineError, connectedEngines, realAdapter } from '../../lib/engines/real';
+import { asKind, suggestPrompts } from '../../lib/prompts';
+
+const MAX_PROMPTS = 20;     // runMeasurement reads at most this many
+const MAX_COMPETITORS = 10;
 
 const text = (form: FormData, key: string, max: number) => String(form.get(key) || '').trim().slice(0, max);
 const list = (form: FormData, key: string) => text(form, key, 400).split(',').map((s) => s.trim()).filter(Boolean).slice(0, 10);
@@ -31,10 +35,9 @@ export async function createWorkspace(form: FormData) {
   if (brand) {
     const rivals = list(form, 'competitors').map((name) => ({ workspace_id: ws, brand_id: brand.id, name }));
     if (rivals.length) await supabase.from('competitors').insert(rivals);
-    const head = [region, vertical].filter(Boolean).join(' ') || brandName;
     await supabase.from('prompts').insert(
-      [`${head} 추천해 줘`, `${head} 비용은 어느 정도야?`, `${vertical || brandName} 고를 때 기준이 뭐야?`]
-        .map((t, i) => ({ workspace_id: ws, brand_id: brand.id, text: t, tier: i === 0 ? 'core' : 'standard', intent: ['추천', '가격', '정보'][i] })),
+      suggestPrompts(asKind(form.get('kind')), { brand: brandName, region, category: vertical })
+        .map((p) => ({ workspace_id: ws, brand_id: brand.id, ...p })),
     );
   }
   revalidatePath('/app');
@@ -49,6 +52,48 @@ export async function addPrompt(form: FormData) {
     tier: form.get('tier') === 'core' ? 'core' : 'standard',
   });
   if (error) return fail('질문을 추가하지 못했습니다. 편집 권한이 있는지 확인해 주세요.');
+  revalidatePath('/app');
+}
+
+// Adds the starter questions for a business type, skipping ones the brand already has.
+export async function addSuggestedPrompts(form: FormData) {
+  const supabase = createClient();
+  const { data: brand } = await supabase.from('brands').select('id,workspace_id,name,region').eq('id', text(form, 'brand_id', 40)).single();
+  if (!brand) return fail('브랜드를 찾지 못했습니다.');
+  const kind = asKind(form.get('kind'));
+  const category = text(form, 'category', 60);
+  if (kind === 'online' && category.length < 2) return fail('제품·서비스 분류를 입력해 주세요. 예: 상업용 부동산 매각 자료 작성 도구');
+  const { data: existing } = await supabase.from('prompts').select('text').eq('brand_id', brand.id);
+  const have = new Set((existing || []).map((p) => p.text));
+  const room = MAX_PROMPTS - have.size;
+  const fresh = suggestPrompts(kind, { brand: brand.name, region: brand.region, category }).filter((p) => !have.has(p.text)).slice(0, Math.max(room, 0));
+  if (!fresh.length) return fail(room <= 0 ? `질문은 ${MAX_PROMPTS}개까지 등록할 수 있습니다.` : '추가할 새 질문이 없습니다.');
+  const { error } = await supabase.from('prompts').insert(fresh.map((p) => ({ workspace_id: brand.workspace_id, brand_id: brand.id, ...p })));
+  if (error) return fail('질문을 추가하지 못했습니다. 편집 권한이 있는지 확인해 주세요.');
+  revalidatePath('/app');
+  redirect('/app?m=' + encodeURIComponent(`질문 ${fresh.length}개를 추가했습니다. 맞지 않는 질문은 삭제해 주세요.`));
+}
+
+export async function addCompetitor(form: FormData) {
+  const supabase = createClient();
+  const { data: brand } = await supabase.from('brands').select('id,workspace_id,name').eq('id', text(form, 'brand_id', 40)).single();
+  if (!brand) return fail('브랜드를 찾지 못했습니다.');
+  const name = text(form, 'name', 80);
+  if (name.length < 2) return fail('경쟁 브랜드 이름을 2자 이상 입력해 주세요.');
+  const { data: existing } = await supabase.from('competitors').select('name').eq('brand_id', brand.id);
+  const taken = [brand.name, ...(existing || []).map((c) => c.name)].map((n) => n.toLowerCase());
+  if (taken.includes(name.toLowerCase())) return fail('이미 등록된 이름입니다.');
+  if ((existing || []).length >= MAX_COMPETITORS) return fail(`경쟁 브랜드는 ${MAX_COMPETITORS}개까지 등록할 수 있습니다.`);
+  const { error } = await supabase.from('competitors').insert({
+    workspace_id: brand.workspace_id, brand_id: brand.id, name, aliases: list(form, 'aliases'), domain: text(form, 'domain', 120) || null,
+  });
+  if (error) return fail('경쟁 브랜드를 추가하지 못했습니다. 편집 권한이 있는지 확인해 주세요.');
+  revalidatePath('/app');
+}
+
+export async function removeCompetitor(form: FormData) {
+  const { error } = await createClient().from('competitors').delete().eq('id', text(form, 'id', 40));
+  if (error) return fail('경쟁 브랜드를 삭제하지 못했습니다.');
   revalidatePath('/app');
 }
 

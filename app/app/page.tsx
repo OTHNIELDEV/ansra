@@ -3,7 +3,8 @@ import { getContext } from '../../lib/brand';
 import { card, field, ghost, label, pct, primary } from '../../lib/ui';
 import { connectedEngines } from '../../lib/engines/real';
 import { MOCK_MODEL } from '../../lib/measure';
-import { addPrompt, createWorkspace, removePrompt, runMeasurement } from './actions';
+import { BRAND_KINDS } from '../../lib/prompts';
+import { addCompetitor, addPrompt, addSuggestedPrompts, createWorkspace, removeCompetitor, removePrompt, runMeasurement } from './actions';
 
 export const metadata: Metadata = { title: 'ANSRA 앱' };
 export const dynamic = 'force-dynamic';
@@ -22,8 +23,9 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
         <label style={label}>브랜드 이름<input name="brand" required maxLength={80} style={field} /></label>
         <label style={label}>다르게 불리는 이름 (선택)<input name="aliases" placeholder="예: 줄임말, 영문 이름" style={field} /></label>
         <label style={label}>홈페이지 도메인 (선택)<input name="domain" placeholder="example.co.kr" style={field} /></label>
-        <label style={label}>지역 (선택)<input name="region" placeholder="예: 분당" style={field} /></label>
-        <label style={label}>업종 (선택)<input name="vertical" placeholder="예: 공인중개사" style={field} /></label>
+        <label style={label}>사업 유형<select name="kind" style={{ ...field, background: '#fff' }}>{BRAND_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
+        <label style={label}>업종 또는 제품·서비스 분류 (선택)<input name="vertical" maxLength={40} placeholder="예: 공인중개사, 상업용 부동산 매각 자료 작성 도구" style={field} /></label>
+        <label style={label}>지역 (선택, 지역 매장·업소만)<input name="region" placeholder="예: 분당" style={field} /></label>
         <label style={label}>경쟁 브랜드 (선택)<input name="competitors" placeholder="쉼표로 구분" style={field} /></label>
         <button style={primary}>등록하고 시작하기</button>
       </form>,
@@ -31,12 +33,13 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
   }
 
   const since = new Date(Date.now() - 30 * 86400 * 1000).toISOString();
-  const [{ data: metrics }, { data: engines }, { data: ranking }, { data: prompts }, { data: recent }] = await Promise.all([
+  const [{ data: metrics }, { data: engines }, { data: ranking }, { data: prompts }, { data: recent }, { data: rivals }] = await Promise.all([
     supabase.from('metrics_daily').select('engine_key,sample_n,mention_n,avg_position,cited_urls').eq('brand_id', brand.id).gte('date', since.slice(0, 10)),
     supabase.from('engines').select('key,label').eq('enabled', true),
     supabase.rpc('brand_ranking', { target_brand: brand.id, since }),
     supabase.from('prompts').select('id,text,tier').eq('brand_id', brand.id).order('created_at'),
     supabase.from('answers').select('id,raw_text,captured_at,model_version,runs(engine_key)').eq('workspace_id', brand.workspace_id).order('captured_at', { ascending: false }).limit(5),
+    supabase.from('competitors').select('id,name,aliases').eq('brand_id', brand.id).order('name'),
   ]);
 
   const byEngine = new Map<string, { n: number; hit: number }>();
@@ -84,6 +87,29 @@ export default async function AppPage({ searchParams }: { searchParams: { m?: st
             <label style={{ ...label, flex: '1 1 240px' }}>새 질문<input name="text" required minLength={4} maxLength={200} placeholder="고객이 AI에 물을 법한 질문" style={field} /></label>
             <label style={label}>구분<select name="tier" style={{ ...field, background: '#fff' }}><option value="standard">일반</option><option value="core">핵심</option></select></label>
             <button style={{ ...primary, alignSelf: 'flex-end' }}>추가</button>
+          </form>
+          <form action={addSuggestedPrompts} style={{ display: 'flex', flexWrap: 'wrap', gap: 10, borderTop: '1px solid #EEF0F2', paddingTop: 12 }}>
+            <input type="hidden" name="brand_id" value={brand.id} />
+            <label style={{ ...label, flex: '1 1 220px' }}>사업 유형<select name="kind" style={{ ...field, background: '#fff' }}>{BRAND_KINDS.map((k) => <option key={k.key} value={k.key}>{k.label}</option>)}</select></label>
+            <label style={{ ...label, flex: '1 1 220px' }}>업종 또는 제품·서비스 분류<input name="category" maxLength={60} defaultValue={brand.vertical || ''} placeholder="예: 상업용 부동산 매각 자료 작성 도구" style={field} /></label>
+            <button style={{ ...ghost, alignSelf: 'flex-end' }}>추천 질문 추가</button>
+          </form>
+        </section>
+        <section style={{ ...card, flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 17 }}>경쟁 브랜드</h2>
+          <p style={{ margin: 0, fontSize: 13, color: '#5B6470', lineHeight: 1.6 }}>답변에서는 여기 등록한 이름만 언급으로 집계합니다. 추가한 뒤의 측정부터 반영됩니다.</p>
+          {(rivals || []).map((c) => (
+            <form key={c.id} action={removeCompetitor} style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #EEF0F2', paddingTop: 10 }}>
+              <input type="hidden" name="id" value={c.id} />
+              <span style={{ fontSize: 14, lineHeight: 1.5 }}>{c.name}{c.aliases?.length ? <span style={{ color: '#5B6470', fontSize: 12 }}> · {c.aliases.join(', ')}</span> : null}</span>
+              <button style={ghost} aria-label={`경쟁 브랜드 삭제: ${c.name}`}>삭제</button>
+            </form>
+          ))}
+          <form action={addCompetitor} style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid #EEF0F2', paddingTop: 12 }}>
+            <input type="hidden" name="brand_id" value={brand.id} />
+            <label style={label}>이름<input name="name" required minLength={2} maxLength={80} style={field} /></label>
+            <label style={label}>다르게 불리는 이름 (선택)<input name="aliases" placeholder="쉼표로 구분" style={field} /></label>
+            <button style={primary}>경쟁 브랜드 추가</button>
           </form>
         </section>
         <section style={{ ...card, flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: 8 }}>
